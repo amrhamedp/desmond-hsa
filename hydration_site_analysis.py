@@ -26,18 +26,18 @@ __doc__='''
 _version = "$Revision: 1.0 $"
 # import shrodinger modules
 from schrodinger import structure
-
+from schrodinger.application.desmond.cms import Vdw
 from schrodinger.trajectory.desmondsimulation import create_simulation
 from schrodinger.trajectory.atomselection import select_component
 from schrodinger.trajectory.atomselection import FrameAslSelection as FAS
-from schrodinger.trajectory.pbc_manager import PBCMeasureMananger
+import schrodinger.application.desmond.ffiostructure as ffiostructure
 
 # import other python modules
 import numpy as np
 #from scipy.spatial import KDTree, cKDTree
 import os, sys, time
-#import math
-degrees_per_rad = 180./np.pi
+
+import _hsacalcs as quick
 
 #################################################################################################################
 # Main GIST class                                                                                               #
@@ -56,7 +56,7 @@ class HSAcalcs:
         self.dsim = create_simulation(input_cmsname, input_trjname)
         self._indexGenerator()
         self.hsa_data = self._initializeHSADict(clustercenter_file)
-        self.box = self._initializePBC()
+        self.pbc = self._initializePBC()
         self.charges, self.vdw = self.getParams()
 
 
@@ -87,56 +87,6 @@ class HSAcalcs:
         self.non_water_atom_ids = np.setxor1d(self.all_atom_ids, self.wat_atom_ids).astype(int)
         #self.non_water_gids = np.setxor1d(self.all_atom_gids,self.wat_atom_gids)
         # These lists define the search space for solute water Hbond calculation
-        acc_list = []
-        don_list = []
-        acc_don_list = []
-        # To speed up calculations, we will pre-create donor atom, hydrogen pairs
-        self.don_H_pair_dict = {}
-        if self.non_water_atom_ids.size != 0:
-            frame_st = self.dsim.getFrameStructure(0)
-            for solute_at_id in self.non_water_atom_ids:
-                solute_atom = frame_st.atom[solute_at_id]
-                solute_atom_type = solute_atom.pdbres.strip(" ") + " " + solute_atom.pdbname.strip(" ")
-                if solute_atom.element in ["O", "S"]:
-                    # if O/S atom is bonded to an H, type it as donor and an acceptor
-                    if "H" in [bonded_atom.element for bonded_atom in solute_atom.bonded_atoms]:
-                        #print "Found donor-acceptor atom type: %i %s" % (solute_at_id, solute_atom_type)
-                        acc_don_list.append(solute_at_id)
-                        # create a dictionary entry for this atom, that will hold all atom, H id pairs 
-                        self.don_H_pair_dict[solute_at_id] = []
-                        for bonded_atom in solute_atom.bonded_atoms:
-                            if bonded_atom.element == "H":
-                                self.don_H_pair_dict[solute_at_id].append([solute_at_id, bonded_atom.index])
-
-                    # if O/S atom is not bonded to an H, type it as an acceptor
-                    else:
-                        #print "Found acceptor atom type: %i %s" % (solute_at_id, solute_atom_type)
-                        acc_list.append(solute_at_id)
-                if solute_atom.element in ["N"]:
-                    # if N atom is bonded to an H, type it as a donor
-                    if "H" in [bonded_atom.element for bonded_atom in solute_atom.bonded_atoms]:
-                        #print "Found donor atom type: %i %s" % (solute_at_id, solute_atom_type)
-                        don_list.append(solute_at_id)
-                        # create a dictionary entry for this atom, that will hold all atom, H id pairs 
-                        self.don_H_pair_dict[solute_at_id] = []
-                        for bonded_atom in solute_atom.bonded_atoms:
-                            if bonded_atom.element == "H":
-                                self.don_H_pair_dict[solute_at_id].append([solute_at_id, bonded_atom.index])
-
-
-                    # if N atom is not bonded to an H, type it as an acceptor
-                    else:
-                        #print "Found acceptor atom type: %i %s" % (solute_at_id, solute_atom_type)
-                        acc_list.append(solute_at_id)
-        #print don_list
-        #print acc_list
-        #print acc_don_list
-        self.solute_acc_ids = np.array(acc_list, dtype=np.int)
-        self.solute_acc_don_ids = np.array(acc_don_list, dtype=np.int)
-        self.solute_don_ids = np.array(don_list, dtype=np.int)
-        #for at in self.don_H_pair_dict:
-            #print at, self.don_H_pair_dict[at]
-
  
 #*********************************************************************************************#
     # retrieve water atom indices for selected oxygen indices 
@@ -224,9 +174,8 @@ class HSAcalcs:
         cluster_centers = clusters.getXYZ()
         c_count = 0
         data_fields = 12
-        self.data_titles = ["wat", "occ", "gO", "nbrs", 
-                        "Esw", "EswLJ", "EswElec", "Eww", "EwwLJ", "EwwElec", "Etot", 
-                        "Enbr", "nbrs"]
+        self.data_titles = ["wat", "occ", "gO", "Esw", "EswLJ", "EswElec", "Eww", "EwwLJ", "EwwElec", "Etot", 
+                        "Enbr", "nbrs", "pair_ene"]
 
         for h in cluster_centers: 
             hs_dict[c_count] = [tuple(h)] # create a dictionary key-value pair with voxel index as key and it's coords as
@@ -307,34 +256,6 @@ class HSAcalcs:
         return near
 
 #*********************************************************************************************#
-    def _getTheta(self, frame, pos1, pos2, pos3):
-        "Adapted from Schrodinger pbc_manager class."
-        pos1.shape=1,3
-        pos2.shape=1,3
-        pos3.shape=1,3
-
-        r21 = frame.getMinimalDifference(pos1, pos2)
-        r23 = frame.getMinimalDifference(pos3, pos2)
-
-        norm = np.sqrt(np.sum(r21**2, axis=1) *
-                          np.sum(r23**2, axis=1))
-        cos_theta = np.sum(r21*r23, axis=1)/norm
-
-        # FIXME: is the isnan check sufficient?
-
-        # handle problem when pos1 or pos3 == pos2; make theta = 0.0 in this
-        # case
-        if np.any(np.isnan(cos_theta)):
-            cos_theta[np.isnan(cos_theta)] = 1.0
-
-        # handle numerical roundoff issue where abs(cos_theta) may be
-        # greater than 1
-        if np.any(np.abs(cos_theta) > 1.0):
-            cos_theta[cos_theta >  1.0] =  1.0
-            cos_theta[cos_theta < -1.0] = -1.0
-        theta = np.arccos(cos_theta) * degrees_per_rad
-        return theta
-
 
 #*********************************************************************************************#
     def getParams(self):
@@ -363,13 +284,13 @@ class HSAcalcs:
             vdw.extend( ct_vdw )
             chg.extend( ct_chg)
             
-        chg = numpy.asarray(chg)*18.2223
+        chg = np.asarray(chg)*18.2223
         vdw_params = [[0,0],]
         #print len(chg)
         #print len(all_at_ids)
         for v in vdw[1:]:
             vdw_params.extend([v.c])
-        vdw_params = numpy.asarray(vdw_params)
+        vdw_params = np.asarray(vdw_params)
         return (chg, vdw_params)
 #*********************************************************************************************#
                    
@@ -383,10 +304,6 @@ class HSAcalcs:
             frame_st = self.dsim.getFrameStructure(i)
             pos = frame.position
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
-            acc_pos = pos[self.solute_acc_ids-1] # obtain coords of O-atoms
-            acc_don_pos = pos[self.solute_acc_don_ids-1] # obtain coords of O-atoms
-            don_pos = pos[self.solute_don_ids-1] # obtain coords of O-atoms
-            # begin iterating over each cluster center in the cluster/HSA dictionary
             for cluster in self.hsa_data:
                 #print "processin cluster: ", cluster
                 nbr_indices = self.getNeighborAtoms(oxygen_pos, 1.0, self.hsa_data[cluster][0])
@@ -395,12 +312,13 @@ class HSAcalcs:
                 for wat_O in cluster_wat_oxygens:
                     self.hsa_data[cluster][1][0] += 1 # raise water population by 1
                     cluster_water_all_atoms = self.getWaterIndices(np.asarray([wat_O]))
-                    rest_wat_at_ids = numpy.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
-                    rest_wat_oxygen_at_ids = numpy.setxor1d(wat_O, self.wat_oxygen_atom_ids) # at indices for rest of solvent water O-atoms
+                    rest_wat_at_ids = np.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
+                    rest_wat_oxygen_at_ids = np.setxor1d(wat_O, self.wat_oxygen_atom_ids) # at indices for rest of solvent water O-atoms
+                    Etot = 0
                     # solute-solvent energy calcs
-                    if self.solute_at_ids.size != 0:
-                        Elec_sw = quick.elecE(cluster_water_all_atoms, self.solute_at_ids, pos, self.charges, self.pbc)*0.5
-                        LJ_sw = quick.vdwE(numpy.asarray([wat_O]), self.solute_at_ids, pos, self.vdw, self.pbc)*0.5
+                    if self.non_water_atom_ids.size != 0:
+                        Elec_sw = quick.elecE(cluster_water_all_atoms, self.non_water_atom_ids, pos, self.charges, self.pbc)*0.5
+                        LJ_sw = quick.vdwE(np.asarray([wat_O]), self.non_water_atom_ids, pos, self.vdw, self.pbc)*0.5
                         #print Elec_sw*0.5, LJ_sw*0.5
                         self.hsa_data[cluster][1][3] += Elec_sw + LJ_sw
                         self.hsa_data[cluster][2][3].append(Elec_sw + LJ_sw)
@@ -408,32 +326,35 @@ class HSAcalcs:
                         self.hsa_data[cluster][2][4].append(LJ_sw)
                         self.hsa_data[cluster][1][5] += Elec_sw
                         self.hsa_data[cluster][2][5].append(Elec_sw)
+                        Etot += Elec_sw + LJ_sw 
                     #********************************************************************************#
                     # solvent-solvent energy calcs
                     # obtain this water's electrostatic interaction with all other atoms
                     # and also collect all its nbr's electrostatic interactions into index 7 of and total number of neighbours into index 8
                     Elec_ww = quick.elecE(cluster_water_all_atoms, rest_wat_at_ids, pos, self.charges, self.pbc)*0.5
-                    LJ_ww = quick.vdwE(numpy.asarray([wat_O]), rest_wat_oxygen_at_ids, pos, self.vdw, self.pbc)*0.5
+                    LJ_ww = quick.vdwE(np.asarray([wat_O]), rest_wat_oxygen_at_ids, pos, self.vdw, self.pbc)*0.5
+                    Etot += Elec_ww + LJ_ww
                     self.hsa_data[cluster][1][6] += Elec_ww + LJ_ww
                     self.hsa_data[cluster][2][6].append(Elec_ww + LJ_ww)
                     self.hsa_data[cluster][1][7] += LJ_ww
                     self.hsa_data[cluster][2][7].append(LJ_ww)
                     self.hsa_data[cluster][1][8] += Elec_ww
                     self.hsa_data[cluster][2][8].append(Elec_ww)
-                    self.hsa_data[cluster][1][9] += Elec_sw + LJ_sw + Elec_ww + LJ_ww
-                    self.hsa_data[cluster][2][9].append(Elec_sw + LJ_sw + Elec_ww + LJ_ww)
+                    self.hsa_data[cluster][1][9] += Elec_ww + LJ_ww
+                    self.hsa_data[cluster][2][9].append(Etot)
 
                     nbr_indices = self.getNeighborAtoms(oxygen_pos, 3.5, pos[wat_O-1])
                     firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                     self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
                     self.hsa_data[cluster][2][11].append(len(firstshell_wat_oxygens)) # add nbrs to nbr timeseries
                     
-                    if len(first_shell_oxygens) != 0:
-                        nbr_energy_array = numpy.zeros(len(first_shell_oxygens), dtype="float64")
-                        quick.nbr_E_ww(O_at_id, numpy.asarray(first_shell_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][10] += numpy.sum(nbr_energy_array)/len(first_shell_oxygens)
+                    if len(firstshell_wat_oxygens) != 0:
+                        nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
+                        quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
+                        self.hsa_data[cluster][1][10] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
+                        self.hsa_data[cluster][2][10].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
                         for ene in nbr_energy_array:
-                            self.hsa_data[cluster][2][10].append(ene)
+                            self.hsa_data[cluster][2][12].append(ene)
 
 #*********************************************************************************************#
 
@@ -498,14 +419,13 @@ class HSAcalcs:
         # for each cluster, go through time series data
         for cluster in self.hsa_data:
             cluster_index = "%03d_" % cluster
-            #print cluster_index
-            for data_field in self.hsa_data[cluster][2]:
+            #print cluster_index#, self.hsa_data[cluster][2]
+            for index, data_field in enumerate(self.hsa_data[cluster][2]):
                 # only write timeseries data that was stored during calculation
                 if len(data_field) != 0:
                     # create appropriate file name
-                    data_file = cluster_index + prefix + "_" + self.data_titles[self.hsa_data[cluster][2].index(data_field)] 
-                    #print self.hsa_data[cluster][2].index(data_field), self.data_titles[self.hsa_data[cluster][2].index(data_field)]
-                    #print data_field
+                    data_file = cluster_index + prefix + "_" + self.data_titles[index] 
+                    #print index, self.data_titles[index]
                     f =  open(data_file, "w")
                     # write each value from the timeseries into the file
                     for value in data_field:
