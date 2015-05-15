@@ -34,6 +34,8 @@ import schrodinger.application.desmond.ffiostructure as ffiostructure
 
 # import other python modules
 import numpy as np
+from scipy import stats
+
 #from scipy.spatial import KDTree, cKDTree
 import os, sys, time
 
@@ -182,8 +184,7 @@ class HSAcalcs:
             hs_dict[c_count].append(np.zeros(data_fields, dtype="float64"))
             hs_dict[c_count].append([]) # to store E_nbr distribution
             for i in range(data_fields+1): hs_dict[c_count][2].append([]) 
-            hs_dict[c_count].append([]) # to store hbond info (protein acceptors)
-            hs_dict[c_count].append([]) # to store hbond info (protein donors)
+            hs_dict[c_count].append(np.zeros(data_fields+1, dtype="float64")) # to store error info on each timeseries
             c_count += 1
         return hs_dict
 
@@ -405,6 +406,21 @@ class HSAcalcs:
                 d[1][10], d[1][11])
             f.write(l)
         f.close()
+        # writing standard deviations
+        e = open(prefix+"_hsa_ene_stats.txt", "w")
+        header_3 = "index Esw EswLJ EswElec Eww EwwLJ EwwElec Etot Enbr nbrs\n"
+        e.write(header_3)
+        for cluster in self.hsa_data:
+            d = self.hsa_data[cluster]
+            l = "%d %f %f %f %f %f %f %f %f %f\n" % \
+                ( cluster, d[3][3], d[3][4], d[3][5], d[3][6], d[3][7], d[3][8], d[3][9],\
+                d[3][10], d[3][11])
+            #print l
+            e.write(l)
+        e.close()
+
+
+#*********************************************************************************************#
 
 
 #*********************************************************************************************#
@@ -432,7 +448,15 @@ class HSAcalcs:
                     #    print value
                         f.write(str(value)+"\n")
                     f.close()
+                    if self.data_titles[index] == "Enbr":
+                        self.hsa_data[cluster][3][index] += stats.sem(np.asarray(data_field), axis=None, ddof=0)
+                        #print self.hsa_data[cluster][3][index]
+                    else:
+                        self.hsa_data[cluster][3][index] += np.std(np.asarray(data_field))
+                        #print self.hsa_data[cluster][3][index]
+
         os.chdir("../")
+#*********************************************************************************************#
 
 
 
@@ -458,8 +482,9 @@ if (__name__ == '__main__') :
     h.hsEnergyCalculation(options.frames, options.start_frame)
     h.normalizeClusterQuantities(options.frames)
     print "Done! took %8.3f seconds." % (time.time() - t)
-    print "Writing summary..."
-    h.writeHBsummary(options.prefix)
     print "Writing timeseries data ..."
     h.writeTimeSeries(options.prefix)
+    print "Writing summary..."
+    h.writeHBsummary(options.prefix)
+
     
