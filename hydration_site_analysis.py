@@ -175,15 +175,17 @@ class HSAcalcs:
         hs_dict = {}
         cluster_centers = clusters.getXYZ()
         c_count = 0
-        data_fields = 12
-        self.data_titles = ["wat", "occ", "gO", "Esw", "EswLJ", "EswElec", "Eww", "EwwLJ", "EwwElec", "Etot", 
-                        "Enbr", "nbrs", "pair_ene"]
+        data_fields = 9
+        self.data_titles = ["wat", "occ", "gO", "Enbr_shell_1", "nbrs_shell_1", 
+                            "Enbr_shell_2", "nbrs_shell_2", 
+                            "Enbr_shell_3", "nbrs_shell_3", 
+                            "pair_ene_shell_1", "pair_ene_shell_2", "pair_ene_shell_3"]
 
         for h in cluster_centers: 
             hs_dict[c_count] = [tuple(h)] # create a dictionary key-value pair with voxel index as key and it's coords as
             hs_dict[c_count].append(np.zeros(data_fields, dtype="float64"))
             hs_dict[c_count].append([]) # to store E_nbr distribution
-            for i in range(data_fields+1): hs_dict[c_count][2].append([]) 
+            for i in range(data_fields+3): hs_dict[c_count][2].append([]) 
             hs_dict[c_count].append(np.zeros(data_fields+1, dtype="float64")) # to store error info on each timeseries
             c_count += 1
         return hs_dict
@@ -198,65 +200,6 @@ class HSAcalcs:
         else:
             box = np.asarray([box_vectors[0], box_vectors[4], box_vectors[8]])
         return box
-#*********************************************************************************************#
-
-#*********************************************************************************************#
-    def getNeighborAtoms(self, xyz, dist, point):
-        """
-        An efficint routine for neighbor search
-        """
-        # create an array of indices around a cubic grid
-        dist_squared = dist * dist
-        neighbors = []
-        for i in (-1, 0, 1):
-            for j in (-1, 0, 1):
-                for k in (-1, 0, 1):
-                    neighbors.append((i,j,k))
-        neighbor_array = np.array(neighbors, np.int)
-        min_ = np.min(xyz, axis=0)
-        cell_size = np.array([dist, dist, dist], np.float)
-        cell = np.array((xyz - min_) / cell_size)#, dtype=np.int)
-        # create a dictionary with keys corresponding to integer representation of transformed XYZ's
-        cells = {}
-        for ix, assignment in enumerate(cell):
-            # convert transformed xyz coord into integer index (so coords like 1.1 or 1.9 will go to 1)
-            indices =  assignment.astype(int)
-            # create interger indices
-            t = tuple(indices)
-            # NOTE: a single index can have multiple coords associated with it
-            # if this integer index is already present
-            if t in cells:
-                # obtain its value (which is a list, see below)
-                xyz_list, trans_coords, ix_list = cells[t]
-                # append new xyz to xyz list associated with this entry
-                xyz_list.append(xyz[ix])
-                # append new transformed xyz to transformed xyz list associated with this entry
-                trans_coords.append(assignment)
-                # append new array index 
-                ix_list.append(ix)
-            # if this integer index is encountered for the first time
-            else:
-                # create a dictionary key value pair,
-                # key: integer index
-                # value: [[list of x,y,z], [list of transformed x,y,z], [list of array indices]]
-                cells[t] = ([xyz[ix]], [assignment], [ix])
-
-        cell0 = np.array((point - min_) / cell_size, dtype=np.int)
-        tuple0 = tuple(cell0)
-        near = []
-        for index_array in tuple0 + neighbor_array:
-            t = tuple(index_array)
-            if t in cells:
-                xyz_list, trans_xyz_list, ix_list = cells[t]
-                for (xyz, ix) in zip(xyz_list, ix_list):
-                    diff = xyz - point
-                    if np.dot(diff, diff) <= dist_squared and float(np.dot(diff, diff)) > 0.0:
-                        #near.append(ix)
-                        #print ix, np.dot(diff, diff)
-                        near.append(ix)
-        return near
-
-#*********************************************************************************************#
 
 #*********************************************************************************************#
     def getParams(self):
@@ -313,37 +256,6 @@ class HSAcalcs:
                 for wat_O in cluster_wat_oxygens:
                     self.hsa_data[cluster][1][0] += 1 # raise water population by 1
                     cluster_water_all_atoms = self.getWaterIndices(np.asarray([wat_O]))
-                    rest_wat_at_ids = np.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
-                    rest_wat_oxygen_at_ids = np.setxor1d(wat_O, self.wat_oxygen_atom_ids) # at indices for rest of solvent water O-atoms
-                    Etot = 0
-                    # solute-solvent energy calcs
-                    if self.non_water_atom_ids.size != 0:
-                        Elec_sw = quick.elecE(cluster_water_all_atoms, self.non_water_atom_ids, pos, self.charges, self.pbc)*0.5
-                        LJ_sw = quick.vdwE(np.asarray([wat_O]), self.non_water_atom_ids, pos, self.vdw, self.pbc)*0.5
-                        #print Elec_sw*0.5, LJ_sw*0.5
-                        self.hsa_data[cluster][1][3] += Elec_sw + LJ_sw
-                        self.hsa_data[cluster][2][3].append(Elec_sw + LJ_sw)
-                        self.hsa_data[cluster][1][4] += LJ_sw
-                        self.hsa_data[cluster][2][4].append(LJ_sw)
-                        self.hsa_data[cluster][1][5] += Elec_sw
-                        self.hsa_data[cluster][2][5].append(Elec_sw)
-                        Etot += Elec_sw + LJ_sw 
-                    #********************************************************************************#
-                    # solvent-solvent energy calcs
-                    # obtain this water's electrostatic interaction with all other atoms
-                    # and also collect all its nbr's electrostatic interactions into index 7 of and total number of neighbours into index 8
-                    Elec_ww = quick.elecE(cluster_water_all_atoms, rest_wat_at_ids, pos, self.charges, self.pbc)*0.5
-                    LJ_ww = quick.vdwE(np.asarray([wat_O]), rest_wat_oxygen_at_ids, pos, self.vdw, self.pbc)*0.5
-                    Etot += Elec_ww + LJ_ww
-                    self.hsa_data[cluster][1][6] += Elec_ww + LJ_ww
-                    self.hsa_data[cluster][2][6].append(Elec_ww + LJ_ww)
-                    self.hsa_data[cluster][1][7] += LJ_ww
-                    self.hsa_data[cluster][2][7].append(LJ_ww)
-                    self.hsa_data[cluster][1][8] += Elec_ww
-                    self.hsa_data[cluster][2][8].append(Elec_ww)
-                    self.hsa_data[cluster][1][9] += Elec_ww + LJ_ww
-                    self.hsa_data[cluster][2][9].append(Etot)
-
                     nbr_indices = self.getNeighborAtoms(oxygen_pos, 3.5, pos[wat_O-1])
                     firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                     self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
@@ -354,6 +266,7 @@ class HSAcalcs:
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
                         self.hsa_data[cluster][1][10] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         self.hsa_data[cluster][2][10].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
+                        #print (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         for ene in nbr_energy_array:
                             self.hsa_data[cluster][2][12].append(ene)
 
@@ -388,7 +301,9 @@ class HSAcalcs:
                 self.hsa_data[cluster][1][9] /= self.hsa_data[cluster][1][0]
                 # Normalized Nbr and Ewwnbr
                 if self.hsa_data[cluster][1][11] != 0:
+                    #print self.hsa_data[cluster][1][10]
                     self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][0]
+                    print self.hsa_data[cluster][1][10]
                     self.hsa_data[cluster][1][11] /= self.hsa_data[cluster][1][0]
 
 #*********************************************************************************************#
@@ -458,6 +373,80 @@ class HSAcalcs:
         os.chdir("../")
 #*********************************************************************************************#
 
+#################################################################################################################
+# Class and methods for 'efficient' neighbor search                                                             #
+#################################################################################################################
+
+class _DistanceCell:
+    def __init__(self, xyz, dist):
+        """
+        Class for fast queries of coordinates that are within distance <dist>
+        of specified coordinate. This class must first be initialized from an
+        array of all available coordinates, and a distance threshold. The
+        query() method can then be used to get a list of points that are within
+        the threshold distance from the specified point.
+        """
+        # create an array of indices around a cubic grid
+        self.neighbors = []
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                for k in (-1, 0, 1):
+                    self.neighbors.append((i,j,k))
+        self.neighbor_array = numpy.array(self.neighbors, numpy.int)
+
+        self.min_ = numpy.min(xyz, axis=0)
+        self.cell_size = numpy.array([dist, dist, dist], numpy.float)
+        cell = numpy.array((xyz - self.min_) / self.cell_size)#, dtype=numpy.int)
+        # create a dictionary with keys corresponding to integer representation of transformed XYZ's
+        self.cells = {}
+        for ix, assignment in enumerate(cell):
+            # convert transformed xyz coord into integer index (so coords like 1.1 or 1.9 will go to 1)
+            indices =  assignment.astype(int)
+            # create interger indices
+            t = tuple(indices)
+            # NOTE: a single index can have multiple coords associated with it
+            # if this integer index is already present
+            if t in self.cells:
+                # obtain its value (which is a list, see below)
+                xyz_list, trans_coords, ix_list = self.cells[t]
+                # append new xyz to xyz list associated with this entry
+                xyz_list.append(xyz[ix])
+                # append new transformed xyz to transformed xyz list associated with this entry
+                trans_coords.append(assignment)
+                # append new array index 
+                ix_list.append(ix)
+            # if this integer index is encountered for the first time
+            else:
+                # create a dictionary key value pair,
+                # key: integer index
+                # value: [[list of x,y,z], [list of transformed x,y,z], [list of array indices]]
+                self.cells[t] = ([xyz[ix]], [assignment], [ix])
+
+        self.dist_squared = dist * dist
+
+
+
+    def query_nbrs(self, point):
+        """
+        Given a coordinate point, return all point indexes (0-indexed) that
+        are within the threshold distance from it.
+        """
+        cell0 = numpy.array((point - self.min_) / self.cell_size, 
+                                     dtype=numpy.int)
+        tuple0 = tuple(cell0)
+        near = []
+        for index_array in tuple0 + self.neighbor_array:
+            t = tuple(index_array)
+            if t in self.cells:
+                xyz_list, trans_xyz_list, ix_list = self.cells[t]
+                for (xyz, ix) in zip(xyz_list, ix_list):
+                    diff = xyz - point
+                    if numpy.dot(diff, diff) <= self.dist_squared and float(numpy.dot(diff, diff)) > 0.0:
+                        #near.append(ix)
+                        #print ix, numpy.dot(diff, diff)
+                        near.append(ix)
+        return near
+#*********************************************************************************************#
 
 
 
