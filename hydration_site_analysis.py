@@ -305,9 +305,12 @@ class HSAcalcs:
             frame_st = self.dsim.getFrameStructure(i)
             pos = frame.position
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
+            d_clust = _DistanceCell(oxygen_pos, 1.0)
+            d_nbrs = _DistanceCell(oxygen_pos, 3.5)
+
             for cluster in self.hsa_data:
                 #print "processin cluster: ", cluster
-                nbr_indices = self.getNeighborAtoms(oxygen_pos, 1.0, self.hsa_data[cluster][0])
+                nbr_indices = d_clust.query_nbrs(self.hsa_data[cluster][0])
                 cluster_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                 # begin iterating over water oxygens found in this cluster in current frame
                 for wat_O in cluster_wat_oxygens:
@@ -341,10 +344,10 @@ class HSAcalcs:
                     self.hsa_data[cluster][2][7].append(LJ_ww)
                     self.hsa_data[cluster][1][8] += Elec_ww
                     self.hsa_data[cluster][2][8].append(Elec_ww)
-                    self.hsa_data[cluster][1][9] += Elec_ww + LJ_ww
+                    self.hsa_data[cluster][1][9] += Etot
                     self.hsa_data[cluster][2][9].append(Etot)
 
-                    nbr_indices = self.getNeighborAtoms(oxygen_pos, 3.5, pos[wat_O-1])
+                    nbr_indices = d_nbrs.query_nbrs(pos[wat_O-1])
                     firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                     self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
                     self.hsa_data[cluster][2][11].append(len(firstshell_wat_oxygens)) # add nbrs to nbr timeseries
@@ -458,6 +461,82 @@ class HSAcalcs:
         os.chdir("../")
 #*********************************************************************************************#
 
+
+
+#################################################################################################################
+# Class and methods for 'efficient' neighbor search                                                             #
+#################################################################################################################
+
+class _DistanceCell:
+    def __init__(self, xyz, dist):
+        """
+        Class for fast queries of coordinates that are within distance <dist>
+        of specified coordinate. This class must first be initialized from an
+        array of all available coordinates, and a distance threshold. The
+        query() method can then be used to get a list of points that are within
+        the threshold distance from the specified point.
+        """
+        # create an array of indices around a cubic grid
+        self.neighbors = []
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                for k in (-1, 0, 1):
+                    self.neighbors.append((i,j,k))
+        self.neighbor_array = np.array(self.neighbors, np.int)
+
+        self.min_ = np.min(xyz, axis=0)
+        self.cell_size = np.array([dist, dist, dist], np.float)
+        cell = np.array((xyz - self.min_) / self.cell_size)#, dtype=np.int)
+        # create a dictionary with keys corresponding to integer representation of transformed XYZ's
+        self.cells = {}
+        for ix, assignment in enumerate(cell):
+            # convert transformed xyz coord into integer index (so coords like 1.1 or 1.9 will go to 1)
+            indices =  assignment.astype(int)
+            # create interger indices
+            t = tuple(indices)
+            # NOTE: a single index can have multiple coords associated with it
+            # if this integer index is already present
+            if t in self.cells:
+                # obtain its value (which is a list, see below)
+                xyz_list, trans_coords, ix_list = self.cells[t]
+                # append new xyz to xyz list associated with this entry
+                xyz_list.append(xyz[ix])
+                # append new transformed xyz to transformed xyz list associated with this entry
+                trans_coords.append(assignment)
+                # append new array index 
+                ix_list.append(ix)
+            # if this integer index is encountered for the first time
+            else:
+                # create a dictionary key value pair,
+                # key: integer index
+                # value: [[list of x,y,z], [list of transformed x,y,z], [list of array indices]]
+                self.cells[t] = ([xyz[ix]], [assignment], [ix])
+
+        self.dist_squared = dist * dist
+
+
+
+    def query_nbrs(self, point):
+        """
+        Given a coordinate point, return all point indexes (0-indexed) that
+        are within the threshold distance from it.
+        """
+        cell0 = np.array((point - self.min_) / self.cell_size, 
+                                     dtype=np.int)
+        tuple0 = tuple(cell0)
+        near = []
+        for index_array in tuple0 + self.neighbor_array:
+            t = tuple(index_array)
+            if t in self.cells:
+                xyz_list, trans_xyz_list, ix_list = self.cells[t]
+                for (xyz, ix) in zip(xyz_list, ix_list):
+                    diff = xyz - point
+                    if np.dot(diff, diff) <= self.dist_squared and float(np.dot(diff, diff)) > 0.0:
+                        #near.append(ix)
+                        #print ix, np.dot(diff, diff)
+                        near.append(ix)
+        return near
+#*********************************************************************************************#
 
 
 
