@@ -176,9 +176,9 @@ class HSAcalcs:
         cluster_centers = clusters.getXYZ()
         c_count = 0
         data_fields = 9
-        self.data_titles = ["wat", "occ", "gO", "Enbr_shell_1", "nbrs_shell_1", 
-                            "Enbr_shell_2", "nbrs_shell_2", 
-                            "Enbr_shell_3", "nbrs_shell_3", 
+        self.data_titles = ["wat", "occ", "gO", "nbrs_shell_1", "Enbr_shell_1", 
+                            "nbrs_shell_2", "Enbr_shell_2", 
+                            "nbrs_shell_3", "Enbr_shell_3",
                             "pair_ene_shell_1", "pair_ene_shell_2", "pair_ene_shell_3"]
 
         for h in cluster_centers: 
@@ -186,7 +186,7 @@ class HSAcalcs:
             hs_dict[c_count].append(np.zeros(data_fields, dtype="float64"))
             hs_dict[c_count].append([]) # to store E_nbr distribution
             for i in range(data_fields+3): hs_dict[c_count][2].append([]) 
-            hs_dict[c_count].append(np.zeros(data_fields+1, dtype="float64")) # to store error info on each timeseries
+            hs_dict[c_count].append(np.zeros(data_fields+3, dtype="float64")) # to store error info on each timeseries
             c_count += 1
         return hs_dict
 
@@ -236,6 +236,9 @@ class HSAcalcs:
             vdw_params.extend([v.c])
         vdw_params = np.asarray(vdw_params)
         return (chg, vdw_params)
+
+#*********************************************************************************************#
+
 #*********************************************************************************************#
                    
     def hsEnergyCalculation(self, n_frame, start_frame):
@@ -248,27 +251,67 @@ class HSAcalcs:
             frame_st = self.dsim.getFrameStructure(i)
             pos = frame.position
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
+
+            d_clust = _DistanceCell(oxygen_pos, 1.0)
+            d_nbrs = _DistanceCell(oxygen_pos, 3.5)
+            d2_outer = _DistanceCell(oxygen_pos, 5.5)
+            d3_outer = _DistanceCell(oxygen_pos, 8.5)
+
+
             for cluster in self.hsa_data:
                 #print "processin cluster: ", cluster
-                nbr_indices = self.getNeighborAtoms(oxygen_pos, 1.0, self.hsa_data[cluster][0])
+                nbr_indices = d_clust.query_nbrs(self.hsa_data[cluster][0])
                 cluster_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                 # begin iterating over water oxygens found in this cluster in current frame
                 for wat_O in cluster_wat_oxygens:
                     self.hsa_data[cluster][1][0] += 1 # raise water population by 1
-                    cluster_water_all_atoms = self.getWaterIndices(np.asarray([wat_O]))
-                    nbr_indices = self.getNeighborAtoms(oxygen_pos, 3.5, pos[wat_O-1])
+
+                    nbr_indices = d_nbrs.query_nbrs(tuple(pos[wat_O-1]))
                     firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
-                    self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
-                    self.hsa_data[cluster][2][11].append(len(firstshell_wat_oxygens)) # add nbrs to nbr timeseries
-                    
+                    self.hsa_data[cluster][1][3] += len(firstshell_wat_oxygens) # add  to cumulative sum
+                    self.hsa_data[cluster][2][3].append(len(firstshell_wat_oxygens)) # add nbrs to nbr timeseries
+                    # First shell calculations
                     if len(firstshell_wat_oxygens) != 0:
                         nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][10] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
-                        self.hsa_data[cluster][2][10].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
+                        self.hsa_data[cluster][1][4] += np.sum(nbr_energy_array)*0.5
+                        self.hsa_data[cluster][2][4].append((np.sum(nbr_energy_array)*0.5))
                         #print (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         for ene in nbr_energy_array:
-                            self.hsa_data[cluster][2][12].append(ene)
+                            self.hsa_data[cluster][2][9].append(ene)
+
+                    outer_2nd_shell_nbrs = d2_outer.query_nbrs(tuple(pos[wat_O-1]))
+                    outer_2nd_shell_oxygens = [self.wat_oxygen_atom_ids[w_at] for w_at in outer_2nd_shell_nbrs]
+                    #print outer_shell_oxygens 
+                    second_shell_oxygens = np.setxor1d(np.asarray(firstshell_wat_oxygens), np.asarray(outer_2nd_shell_oxygens)) # at indices for rest of solvent water O-atoms
+                    #print subshell_oxygens
+                    #subshell_wat = self._indexmap._index_mapper.getWaterAtids(subshell_oxygens)
+                    self.hsa_data[cluster][1][5] += len(second_shell_oxygens) # add  to cumulative sum
+                    self.hsa_data[cluster][2][5].append(len(second_shell_oxygens)) # add nbrs to nbr timeseries
+                    if len(second_shell_oxygens) != 0:
+                        second_shell_energy_array = np.zeros(len(second_shell_oxygens), dtype="float64")
+                        quick.nbr_E_ww(wat_O, np.asarray(second_shell_oxygens), pos, self.vdw, self.charges, self.pbc, second_shell_energy_array)
+                        self.hsa_data[cluster][1][6] += np.sum(second_shell_energy_array/2.0) # add energy to the energy total
+                        self.hsa_data[cluster][2][6].append(np.sum(second_shell_energy_array)/2.0) # add total energy to the list 
+                        for ene in second_shell_energy_array:
+                            self.hsa_data[cluster][2][9].append(ene)
+                        #print outer_nbr_energy_array
+
+                    outer_3rd_shell_nbrs = d3_outer.query_nbrs(tuple(pos[wat_O-1]))
+                    outer_3rd_shell_oxygens = [self.wat_oxygen_atom_ids[w_at] for w_at in outer_3rd_shell_nbrs]
+                    #print outer_shell_oxygens 
+                    third_shell_oxygens = np.setxor1d(np.asarray(outer_2nd_shell_oxygens) , np.asarray(outer_3rd_shell_oxygens)) # at indices for rest of solvent water O-atoms
+                    #print subshell_oxygens
+                    #subshell_wat = self._indexmap._index_mapper.getWaterAtids(subshell_oxygens)
+                    self.hsa_data[cluster][1][7] += len(third_shell_oxygens) # add  to cumulative sum
+                    self.hsa_data[cluster][2][7].append(len(third_shell_oxygens)) # add nbrs to nbr timeseries
+                    if len(third_shell_oxygens) != 0:
+                        third_shell_energy_array = np.zeros(len(third_shell_oxygens), dtype="float64")
+                        quick.nbr_E_ww(wat_O, np.asarray(third_shell_oxygens), pos, self.vdw, self.charges, self.pbc, third_shell_energy_array)
+                        self.hsa_data[cluster][1][8] += np.sum(third_shell_energy_array/2.0) # add energy to the energy total
+                        self.hsa_data[cluster][2][8].append(np.sum(third_shell_energy_array)/2.0) # add total energy to the list 
+                        for ene in third_shell_energy_array:
+                            self.hsa_data[cluster][2][10].append(ene)
 
 #*********************************************************************************************#
 
@@ -283,53 +326,45 @@ class HSAcalcs:
                 self.hsa_data[cluster][1][1] = self.hsa_data[cluster][1][0]/n_frame
                 # gO of the cluster
                 self.hsa_data[cluster][1][2] = self.hsa_data[cluster][1][0]/(bulkwaterpersite)
-                if self.non_water_atom_ids.size != 0:
-                    # normalized Esw
-                    self.hsa_data[cluster][1][3] /= self.hsa_data[cluster][1][0]
-                    # normalized EswLJ
-                    self.hsa_data[cluster][1][4] /= self.hsa_data[cluster][1][0]
-                    # normalized EswElec
-                    self.hsa_data[cluster][1][5] /= self.hsa_data[cluster][1][0]
 
-                # normalized Eww
-                self.hsa_data[cluster][1][6] /= self.hsa_data[cluster][1][0]
-                # normalized EwwLJ
-                self.hsa_data[cluster][1][7] /= self.hsa_data[cluster][1][0]
-                # normalized EwwElec
-                self.hsa_data[cluster][1][8] /= self.hsa_data[cluster][1][0]
-                # normalized Etot
-                self.hsa_data[cluster][1][9] /= self.hsa_data[cluster][1][0]
                 # Normalized Nbr and Ewwnbr
-                if self.hsa_data[cluster][1][11] != 0:
+                if self.hsa_data[cluster][1][3] != 0:
                     #print self.hsa_data[cluster][1][10]
-                    self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][0]
-                    print self.hsa_data[cluster][1][10]
-                    self.hsa_data[cluster][1][11] /= self.hsa_data[cluster][1][0]
+                    self.hsa_data[cluster][1][3] /= self.hsa_data[cluster][1][0]
+                    self.hsa_data[cluster][1][4] /= self.hsa_data[cluster][1][0]
+                if self.hsa_data[cluster][1][5] != 0:
+                    #print self.hsa_data[cluster][1][10]
+                    self.hsa_data[cluster][1][5] /= self.hsa_data[cluster][1][0]
+                    self.hsa_data[cluster][1][6] /= self.hsa_data[cluster][1][0]
+                if self.hsa_data[cluster][1][7] != 0:
+                    #print self.hsa_data[cluster][1][10]
+                    self.hsa_data[cluster][1][7] /= self.hsa_data[cluster][1][0]
+                    self.hsa_data[cluster][1][8] /= self.hsa_data[cluster][1][0]
 
 #*********************************************************************************************#
 
     def writeHBsummary(self, prefix):
         f = open(prefix+"_hsa_ene_summary.txt", "w")
-        header_2 = "index x y z wat occ gO Esw EswLJ EswElec Eww EwwLJ EwwElec Etot Enbr nbrs\n"
+        header_2 = "index x y z wat occ gO nbrs_shell_1 Enbr_shell_1 nbrs_shell_2 Enbr_shell_2 nbrs_shell_3 Enbr_shell_3\n"
         f.write(header_2)
         for cluster in self.hsa_data:
             d = self.hsa_data[cluster]
-            l = "%d %.2f %.2f %.2f %d %f %f %f %f %f %f %f %f %f %f %f\n" % \
+            l = "%d %.2f %.2f %.2f %d %f %f %f %f %f %f %f %f\n" % \
                 ( cluster, d[0][0], d[0][1], d[0][2], \
                 d[1][0], d[1][1], d[1][2], \
-                d[1][3], d[1][4], d[1][5], d[1][6], d[1][7], d[1][8], d[1][9],\
-                d[1][10], d[1][11])
+                d[1][3], d[1][4], d[1][5], d[1][6], d[1][7], d[1][8])
             f.write(l)
         f.close()
         # writing standard deviations
         e = open(prefix+"_hsa_ene_stats.txt", "w")
-        header_3 = "index Esw EswLJ EswElec Eww EwwLJ EwwElec Etot Enbr nbrs\n"
+        header_3 = "index Enbr_shell_1 nbrs_shell_1 Enbr_shell_2 nbrs_shell_2 Enbr_shell_3 nbrs_shell_3\n"
         e.write(header_3)
         for cluster in self.hsa_data:
             d = self.hsa_data[cluster]
-            l = "%d %f %f %f %f %f %f %f %f %f\n" % \
-                ( cluster, d[3][3], d[3][4], d[3][5], d[3][6], d[3][7], d[3][8], d[3][9],\
-                d[3][10], d[3][11])
+            l = "%d %.2f %.2f %.2f %d %f %f %f %f %f %f %f %f\n" % \
+                ( cluster, d[0][0], d[0][1], d[0][2], \
+                d[1][0], d[1][1], d[1][2], \
+                d[3][3], d[3][4], d[3][5], d[3][6], d[3][7], d[3][8])
             #print l
             e.write(l)
         e.close()
@@ -343,7 +378,7 @@ class HSAcalcs:
     def writeTimeSeries(self, prefix):
         cwd = os.getcwd()
         # create directory to store detailed data for individual columns in HSA
-        directory = cwd + "/" + prefix+"_cluster_ene_data"
+        directory = cwd + "/" + prefix+"_cluster_longrange_ene_data"
         if not os.path.exists(directory):
             os.makedirs(directory)
         os.chdir(directory)
@@ -363,12 +398,8 @@ class HSAcalcs:
                     #    print value
                         f.write(str(value)+"\n")
                     f.close()
-                    if self.data_titles[index] == "Enbr":
-                        self.hsa_data[cluster][3][index] += stats.sem(np.asarray(data_field), axis=None, ddof=0)
-                        #print self.hsa_data[cluster][3][index]
-                    else:
-                        self.hsa_data[cluster][3][index] += np.std(np.asarray(data_field))
-                        #print self.hsa_data[cluster][3][index]
+                    self.hsa_data[cluster][3][index] += np.std(np.asarray(data_field))
+                    #print self.hsa_data[cluster][3][index]
 
         os.chdir("../")
 #*********************************************************************************************#
@@ -392,11 +423,11 @@ class _DistanceCell:
             for j in (-1, 0, 1):
                 for k in (-1, 0, 1):
                     self.neighbors.append((i,j,k))
-        self.neighbor_array = numpy.array(self.neighbors, numpy.int)
+        self.neighbor_array = np.array(self.neighbors, np.int)
 
-        self.min_ = numpy.min(xyz, axis=0)
-        self.cell_size = numpy.array([dist, dist, dist], numpy.float)
-        cell = numpy.array((xyz - self.min_) / self.cell_size)#, dtype=numpy.int)
+        self.min_ = np.min(xyz, axis=0)
+        self.cell_size = np.array([dist, dist, dist], np.float)
+        cell = np.array((xyz - self.min_) / self.cell_size)#, dtype=np.int)
         # create a dictionary with keys corresponding to integer representation of transformed XYZ's
         self.cells = {}
         for ix, assignment in enumerate(cell):
@@ -431,8 +462,8 @@ class _DistanceCell:
         Given a coordinate point, return all point indexes (0-indexed) that
         are within the threshold distance from it.
         """
-        cell0 = numpy.array((point - self.min_) / self.cell_size, 
-                                     dtype=numpy.int)
+        cell0 = np.array((point - self.min_) / self.cell_size, 
+                                     dtype=np.int)
         tuple0 = tuple(cell0)
         near = []
         for index_array in tuple0 + self.neighbor_array:
@@ -441,9 +472,9 @@ class _DistanceCell:
                 xyz_list, trans_xyz_list, ix_list = self.cells[t]
                 for (xyz, ix) in zip(xyz_list, ix_list):
                     diff = xyz - point
-                    if numpy.dot(diff, diff) <= self.dist_squared and float(numpy.dot(diff, diff)) > 0.0:
+                    if np.dot(diff, diff) <= self.dist_squared and float(np.dot(diff, diff)) > 0.0:
                         #near.append(ix)
-                        #print ix, numpy.dot(diff, diff)
+                        #print ix, np.dot(diff, diff)
                         near.append(ix)
         return near
 #*********************************************************************************************#
