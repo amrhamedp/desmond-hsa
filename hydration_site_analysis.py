@@ -274,8 +274,8 @@ class HSAcalcs:
                     if len(firstshell_wat_oxygens) != 0:
                         nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][4] += np.sum(nbr_energy_array)*0.5
-                        self.hsa_data[cluster][2][4].append((np.sum(nbr_energy_array)*0.5))
+                        self.hsa_data[cluster][1][4] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
+                        self.hsa_data[cluster][2][4].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
                         #print (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         for ene in nbr_energy_array:
                             self.hsa_data[cluster][2][9].append(ene)
