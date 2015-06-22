@@ -312,7 +312,7 @@ PyObject *_gistcalcs_nbr_E_ww( PyObject *self, PyObject *args)
                 } // end looping over water hydrogen atoms
             } // end looping over target water hydrogen atoms
         //printf("target water atom ID x y z energy: %i %5.3f %5.3f %5.3f %5.3f\n", *target_at, *w2x, *w2y, *w2z, E_wat/2.0);
-        *(double *)PyArray_GETPTR1(nbr_energies, i) += E_wat;
+        *(double *)PyArray_GETPTR1(nbr_energies, i) += d_oo;
         
     }
     return Py_BuildValue("i", 1);
