@@ -206,14 +206,14 @@ PyObject *_gistcalcs_nbr_E_ww( PyObject *self, PyObject *args)
     int i, m, o, p;
     int wat_O;
     double *b_x, *b_y, *b_z; // variables to store box info
-    double *w1x, *w1y, *w1z, *h1x, *h1y, *h1z; // variables to store water molecule's coordinates (separately for O and H-atoms)
+    double *w1x, *w1y, *w1z, *h1x, *h1y, *h1z, *w1_sig, *w1_eps; // variables to store water molecule's coordinates (separately for O and H-atoms)
     double *w1c, *h1c; // variables to store water molecule's non-bonded params 
-    double *w2x, *w2y, *w2z, *h2x, *h2y, *h2z; // variables to store water molecule's coordinates (separately for O and H-atoms)
+    double *w2x, *w2y, *w2z, *h2x, *h2y, *h2z, *w2_sig, *w2_eps; // variables to store water molecule's coordinates (separately for O and H-atoms)
     double *w2c, *h2c; // variables to store water molecule's non-bonded params 
-    double dist6, dist12, d_oo, d_oh, d_hh; // distances 
+    double comb_eps, comb_sig, aij, bij, dist6, dist12, d_oo, d_oh, d_hh; // distances 
 
-    const double aij_wat = 581935.564;
-    const double bij_wat = -594.825035;
+    //const double aij_wat = 581935.564;
+    //const double bij_wat = -594.825035;
 
     PyArrayObject *other_at_ids, *coords, *vdwparms, *charges, *box, *nbr_energies;
     
@@ -241,6 +241,9 @@ PyObject *_gistcalcs_nbr_E_ww( PyObject *self, PyObject *args)
     w1y = PyArray_GETPTR2(coords, wat_O-1, 1); // obtain x, y, z
     w1z = PyArray_GETPTR2(coords, wat_O-1, 2);
     w1c = PyArray_GETPTR1(charges, wat_O); // charge on this atom
+    w1_sig = PyArray_GETPTR2(vdwparms, wat_O, 0);
+    w1_eps = PyArray_GETPTR2(vdwparms, wat_O, 1);
+
     //printf("water atom ID x y z charge: %i %5.3f %5.3f %5.3f %5.3f \n", wat_O, *w1x, *w1y, *w1z, *w1c);
     // for each neighbor water
     for (i = 0; i < m; i++) {
@@ -255,13 +258,15 @@ PyObject *_gistcalcs_nbr_E_ww( PyObject *self, PyObject *args)
         w2y = PyArray_GETPTR2(coords, *target_O_at-1, 1); // obtain x, y, z
         w2z = PyArray_GETPTR2(coords, *target_O_at-1, 2);
         w2c = PyArray_GETPTR1(charges, *target_O_at); // charge on this atom
+        w2_sig = PyArray_GETPTR2(vdwparms, *target_O_at, 0);
+        w2_eps = PyArray_GETPTR2(vdwparms, *target_O_at, 1);
         //printf("water atom ID x y z charge: %i %5.3f %5.3f %5.3f %5.3f \n", *target_O_at, *w2x, *w2y, *w2z, *w2c);
 
         // we first calculate this neighbor water molecule's oxygen non-bonded interactions (both vdw and elec) with current water atom
         d_oo = dist_mic(*w1x, *w1y, *w1z, *w2x, *w2y, *w2z, *b_x, *b_y, *b_z); // distance (based on minimum image convention)
         dist6 = pow(d_oo, 6);
         dist12 = dist6 * dist6;
-        /*
+        
         // Coulombic interaction calculation
         // Coulombic interaction calculation
         comb_sig = (*w1_sig + *w2_sig)/2.0;
@@ -270,9 +275,10 @@ PyObject *_gistcalcs_nbr_E_ww( PyObject *self, PyObject *args)
         bij = -4*comb_eps*pow(comb_sig, 6);
         //*(double *)PyArray_GETPTR2(voxel_data, v_id, 13) += ((*w1c)*(*w2c))/d_oo; 
         //*(double *)PyArray_GETPTR2(voxel_data, v_id, 13) += (aij_wat/dist12)+(bij_wat/dist6);
-        */
+        
         E_wat += ((*w1c)*(*w2c))/d_oo;
-        E_wat += (aij_wat/dist12)+(bij_wat/dist6);
+        //E_wat += (aij_wat/dist12)+(bij_wat/dist6);
+        E_wat += (aij/dist12)+(bij/dist6);
         // for each nbr oxygen go over its hydrogen
         for (p = wat_O+1; p <= wat_O+2; p++){
             //printf("processing water atom: %i\n", m);
