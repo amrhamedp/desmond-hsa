@@ -274,8 +274,8 @@ class HSAcalcs:
                     if len(firstshell_wat_oxygens) != 0:
                         nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][4] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
-                        self.hsa_data[cluster][2][4].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
+                        self.hsa_data[cluster][1][4] += np.sum(nbr_energy_array/2.0)
+                        self.hsa_data[cluster][2][4].append((np.sum(nbr_energy_array)/2.0))
                         #print (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         for ene in nbr_energy_array:
                             self.hsa_data[cluster][2][9].append(ene)
@@ -292,7 +292,7 @@ class HSAcalcs:
                         second_shell_energy_array = np.zeros(len(second_shell_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(second_shell_oxygens), pos, self.vdw, self.charges, self.pbc, second_shell_energy_array)
                         self.hsa_data[cluster][1][6] += np.sum(second_shell_energy_array/2.0) # add energy to the energy total
-                        self.hsa_data[cluster][2][6].append(np.sum(second_shell_energy_array)/2.0) # add total energy to the list 
+                        self.hsa_data[cluster][2][6].append(np.sum(second_shell_energy_array/2.0)) # add total energy to the list 
                         for ene in second_shell_energy_array:
                             self.hsa_data[cluster][2][9].append(ene)
                         #print outer_nbr_energy_array
@@ -309,7 +309,7 @@ class HSAcalcs:
                         third_shell_energy_array = np.zeros(len(third_shell_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(third_shell_oxygens), pos, self.vdw, self.charges, self.pbc, third_shell_energy_array)
                         self.hsa_data[cluster][1][8] += np.sum(third_shell_energy_array/2.0) # add energy to the energy total
-                        self.hsa_data[cluster][2][8].append(np.sum(third_shell_energy_array)/2.0) # add total energy to the list 
+                        self.hsa_data[cluster][2][8].append(np.sum(third_shell_energy_array/2.0)) # add total energy to the list 
                         for ene in third_shell_energy_array:
                             self.hsa_data[cluster][2][10].append(ene)
 
