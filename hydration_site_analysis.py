@@ -198,7 +198,6 @@ class HSAcalcs:
         else:
             box = np.asarray([box_vectors[0], box_vectors[4], box_vectors[8]])
         return box
-#*********************************************************************************************#
 
 #*********************************************************************************************#
     def getNeighborAtoms(self, xyz, dist, point):
@@ -306,7 +305,7 @@ class HSAcalcs:
             frame_st = self.dsim.getFrameStructure(i)
             pos = frame.position
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
-            d_clust = _DistanceCell(oxygen_pos, 1.0)
+            d_clust = _DistanceCell(oxygen_pos, 10)
             d_nbrs = _DistanceCell(oxygen_pos, 3.5)
 
             for cluster in self.hsa_data:
@@ -320,7 +319,7 @@ class HSAcalcs:
                     rest_wat_at_ids = np.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
                     rest_wat_oxygen_at_ids = np.setxor1d(wat_O, self.wat_oxygen_atom_ids) # at indices for rest of solvent water O-atoms
                     Etot = 0
-                    """
+                    
                     # solute-solvent energy calcs
                     if self.non_water_atom_ids.size != 0:
                         Elec_sw = quick.elecE(cluster_water_all_atoms, self.non_water_atom_ids, pos, self.charges, self.pbc)*0.5
@@ -348,7 +347,7 @@ class HSAcalcs:
                     self.hsa_data[cluster][2][8].append(Elec_ww)
                     self.hsa_data[cluster][1][9] += Etot
                     self.hsa_data[cluster][2][9].append(Etot)
-                    """
+                    
                     nbr_indices = d_nbrs.query_nbrs(pos[wat_O-1])
                     firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
                     self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
@@ -564,11 +563,11 @@ if (__name__ == '__main__') :
     print "Running calculations ..."
     t = time.time()
     h.hsEnergyCalculation(options.frames, options.start_frame)
-    #h.normalizeClusterQuantities(options.frames)
+    h.normalizeClusterQuantities(options.frames)
     print "Done! took %8.3f seconds." % (time.time() - t)
     print "Writing timeseries data ..."
     h.writeTimeSeries(options.prefix)
     print "Writing summary..."
-    #h.writeHBsummary(options.prefix)
+    h.writeHBsummary(options.prefix)
 
     
