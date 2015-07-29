@@ -305,7 +305,7 @@ class HSAcalcs:
             frame_st = self.dsim.getFrameStructure(i)
             pos = frame.position
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
-            d_clust = _DistanceCell(oxygen_pos, 10)
+            d_clust = _DistanceCell(oxygen_pos, 1.0)
             d_nbrs = _DistanceCell(oxygen_pos, 3.5)
 
             for cluster in self.hsa_data:
@@ -356,7 +356,7 @@ class HSAcalcs:
                     if len(firstshell_wat_oxygens) != 0:
                         nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][10] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
+                        self.hsa_data[cluster][1][10] += np.sum(nbr_energy_array*0.5)
                         self.hsa_data[cluster][2][10].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
                         for ene in nbr_energy_array:
                             #print ene
@@ -395,7 +395,7 @@ class HSAcalcs:
                 self.hsa_data[cluster][1][9] /= self.hsa_data[cluster][1][0]
                 # Normalized Nbr and Ewwnbr
                 if self.hsa_data[cluster][1][11] != 0:
-                    self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][0]
+                    self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][11]
                     self.hsa_data[cluster][1][11] /= self.hsa_data[cluster][1][0]
 
 #*********************************************************************************************#
