@@ -186,7 +186,11 @@ PyObject *_gistcalcs_vdwE( PyObject *self, PyObject *args)
             sz = PyArray_GETPTR2(coords, *other-1, 2);
             s_sig = PyArray_GETPTR2(vdwparms, *other, 0);
             s_eps = PyArray_GETPTR2(vdwparms, *other, 1);
-            comb_sig = (*w_sig + *s_sig)/2;
+            // arithmetic rule
+            //comb_sig = (*w_sig + *s_sig)/2;
+            //comb_eps = sqrt((*w_eps)*(*s_eps));
+            // geometric rule
+            comb_sig = sqrt((*w_sig)* (*s_sig));
             comb_eps = sqrt((*w_eps)*(*s_eps));
             d = dist_mic(*wx, *wy, *wz, *sx, *sy, *sz, *b_x, *b_y, *b_z);
             dist6 = pow(d, 6);
