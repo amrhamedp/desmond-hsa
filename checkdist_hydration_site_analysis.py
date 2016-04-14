@@ -4,7 +4,7 @@ __doc__='''
 #===============================================================================
 #
 #          FILE:  Main classes and functions implementing hydrogen bond calculations on a 3-D grid
-                  In general this grid coincides with a GIST grid from a previously run GIST calculation.
+#                 In general this grid coincides with a GIST grid from a previously run GIST calculation.
 #         USAGE:  a tester script will be provided as an example 
 # 
 #   DESCRIPTION:  
@@ -256,8 +256,6 @@ class HSAcalcs:
         return near
 
 #*********************************************************************************************#
-
-#*********************************************************************************************#
     def getParams(self):
         # obtain LJ and Elec params
         #*********************************************************************************#
@@ -293,6 +291,39 @@ class HSAcalcs:
         vdw_params = np.asarray(vdw_params)
 
         return (chg, vdw_params)
+
+#*********************************************************************************************#
+                   
+    def hs_check_dist(self, n_frame, start_frame):
+        # first step is to iterate over each frame
+        dist_list = [[] for cluster in self.hsa_data]
+        for i in xrange(start_frame, start_frame + n_frame):
+            print "Processing frame: ", i+1, "..."
+            # get frame structure, position array
+            frame = self.dsim.getFrame(i)
+            #measure_manager = PBCMeasureMananger(frame)
+            frame_st = self.dsim.getFrameStructure(i)
+            pos = frame.position
+            oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
+            d_clust = _DistanceCell(oxygen_pos, 1.0)
+            d_nbrs = _DistanceCell(oxygen_pos, 3.5)
+
+            for cluster in self.hsa_data:
+                #print "processin cluster: ", cluster
+                nbr_indices = d_clust.query_nbrs(self.hsa_data[cluster][0])
+                cluster_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index[0]] for nbr_index in nbr_indices]
+                # begin iterating over water oxygens found in this cluster in current frame
+                for index, wat_O in enumerate(cluster_wat_oxygens):
+                    #print "Cluster #", cluster
+                    #print "\tdistance from center: ", np.sqrt(nbr_indices[index][1])
+                    dist_list[cluster].append(np.sqrt(nbr_indices[index][1]))
+        for clust, dists in enumerate(dist_list):
+            f_name =  "%03d_dist.txt" % clust
+            data = open(f_name, "w")
+            for dist in dists:
+                #print dist
+                data.write(str(dist)+"\n")
+            data.close()
 #*********************************************************************************************#
                    
     def hsEnergyCalculation(self, n_frame, start_frame):
@@ -311,9 +342,9 @@ class HSAcalcs:
             for cluster in self.hsa_data:
                 #print "processin cluster: ", cluster
                 nbr_indices = d_clust.query_nbrs(self.hsa_data[cluster][0])
-                cluster_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
+                cluster_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index[0]] for nbr_index in nbr_indices]
                 # begin iterating over water oxygens found in this cluster in current frame
-                for wat_O in cluster_wat_oxygens:
+                for index, wat_O in enumerate(cluster_wat_oxygens):
                     self.hsa_data[cluster][1][0] += 1 # raise water population by 1
                     cluster_water_all_atoms = self.getWaterIndices(np.asarray([wat_O]))
                     rest_wat_at_ids = np.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
@@ -349,7 +380,7 @@ class HSAcalcs:
                     self.hsa_data[cluster][2][9].append(Etot)
                     
                     nbr_indices = d_nbrs.query_nbrs(pos[wat_O-1])
-                    firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index] for nbr_index in nbr_indices]
+                    firstshell_wat_oxygens = [self.wat_oxygen_atom_ids[nbr_index[0]] for nbr_index in nbr_indices]
                     self.hsa_data[cluster][1][11] += len(firstshell_wat_oxygens) # add  to cumulative sum
                     self.hsa_data[cluster][2][11].append(len(firstshell_wat_oxygens)) # add nbrs to nbr timeseries
                     #print wat_O, firstshell_wat_oxygens
@@ -538,7 +569,7 @@ class _DistanceCell:
                     if np.dot(diff, diff) <= self.dist_squared and float(np.dot(diff, diff)) > 0.0:
                         #near.append(ix)
                         #print ix, np.dot(diff, diff)
-                        near.append(ix)
+                        near.append((ix, np.dot(diff, diff)))
         return near
 #*********************************************************************************************#
 
@@ -562,12 +593,13 @@ if (__name__ == '__main__') :
     h = HSAcalcs(options.cmsname, options.trjname, options.clusters)
     print "Running calculations ..."
     t = time.time()
-    h.hsEnergyCalculation(options.frames, options.start_frame)
-    h.normalizeClusterQuantities(options.frames)
-    print "Done! took %8.3f seconds." % (time.time() - t)
-    print "Writing timeseries data ..."
-    h.writeTimeSeries(options.prefix)
-    print "Writing summary..."
-    h.writeHBsummary(options.prefix)
+    h.hs_check_dist(options.frames, options.start_frame)
+    #h.hsEnergyCalculation(options.frames, options.start_frame)
+    #h.normalizeClusterQuantities(options.frames)
+    #print "Done! took %8.3f seconds." % (time.time() - t)
+    #print "Writing timeseries data ..."
+    #h.writeTimeSeries(options.prefix)
+    #print "Writing summary..."
+    #h.writeHBsummary(options.prefix)
 
     

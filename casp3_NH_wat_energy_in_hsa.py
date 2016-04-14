@@ -40,6 +40,7 @@ from scipy import stats
 import os, sys, time
 
 import _hsacalcs as quick
+degrees_per_rad = 180./np.pi
 
 #################################################################################################################
 # Main GIST class                                                                                               #
@@ -294,11 +295,39 @@ class HSAcalcs:
 
         return (chg, vdw_params)
 #*********************************************************************************************#
+    def _getTheta(self, frame, pos1, pos2, pos3):
+        "Adapted from Schrodinger pbc_manager class."
+        pos1.shape=1,3
+        pos2.shape=1,3
+        pos3.shape=1,3
+
+        r21 = frame.getMinimalDifference(pos1, pos2)
+        r23 = frame.getMinimalDifference(pos3, pos2)
+
+        norm = np.sqrt(np.sum(r21**2, axis=1) *
+                          np.sum(r23**2, axis=1))
+        cos_theta = np.sum(r21*r23, axis=1)/norm
+
+        # FIXME: is the isnan check sufficient?
+
+        # handle problem when pos1 or pos3 == pos2; make theta = 0.0 in this
+        # case
+        if np.any(np.isnan(cos_theta)):
+            cos_theta[np.isnan(cos_theta)] = 1.0
+
+        # handle numerical roundoff issue where abs(cos_theta) may be
+        # greater than 1
+        if np.any(np.abs(cos_theta) > 1.0):
+            cos_theta[cos_theta >  1.0] =  1.0
+            cos_theta[cos_theta < -1.0] = -1.0
+        theta = np.arccos(cos_theta) * degrees_per_rad
+        return theta
+#*********************************************************************************************#
                    
     def hsEnergyCalculation(self, n_frame, start_frame):
         # first step is to iterate over each frame
         for i in xrange(start_frame, start_frame + n_frame):
-            print "Processing frame: ", i+1, "..."
+            #print "Processing frame: ", i+1, "..."
             # get frame structure, position array
             frame = self.dsim.getFrame(i)
             #measure_manager = PBCMeasureMananger(frame)
@@ -307,6 +336,16 @@ class HSAcalcs:
             oxygen_pos = pos[self.wat_oxygen_atom_ids-1] # obtain coords of O-atoms
             d_clust = _DistanceCell(oxygen_pos, 1.0)
             d_nbrs = _DistanceCell(oxygen_pos, 3.5)
+
+            # ARG64 (NH2, 1HH2), GLN161 (NE2, HNE2), GLN161 (O)
+            #solute_atoms_clust0 = [[551, 564], [2122, 2130]]#, [2117]]
+            solute_atoms_clust0 = [[2117]]
+            # ARG64 (NE, HE), ARG207(NH1, 1HH1),ARG207(NE, HE)
+            solute_atoms_clust4 = [[548, 560], [2678, 2690], [2676, 2688]]
+            
+            #solute_atoms_clust0 = [[23, 24]]
+            #solute_atoms_clust2 = [[23, 25], [26, 28]]
+            #solute_atoms_clust1 = [[20, 21], [26, 27]]
 
             for cluster in self.hsa_data:
                 #print "processin cluster: ", cluster
@@ -319,12 +358,33 @@ class HSAcalcs:
                     rest_wat_at_ids = np.setxor1d(cluster_water_all_atoms, self.wat_atom_ids) # at indices for rest of solvent water atoms
                     rest_wat_oxygen_at_ids = np.setxor1d(wat_O, self.wat_oxygen_atom_ids) # at indices for rest of solvent water O-atoms
                     Etot = 0
-                    
+                    wat_O_pos = pos[wat_O-1]
+                    theta_list = []
                     # solute-solvent energy calcs
-                    if self.non_water_atom_ids.size != 0:
-                        Elec_sw = quick.elecE(cluster_water_all_atoms, self.non_water_atom_ids, pos, self.charges, self.pbc)*0.5
-                        LJ_sw = quick.vdwE(np.asarray([wat_O]), self.non_water_atom_ids, pos, self.vdw, self.pbc)*0.5
-                        #print Elec_sw*0.5, LJ_sw*0.5
+                    for solute_atms in solute_atoms_clust0:
+                        solute_atom_ids = np.asarray(solute_atms)
+                        # this is to check if correct solute atoms are being considered
+                        #for s in solute_atom_ids:
+                        #    print self.dsim.cst.atom[s].pdbname, self.dsim.cst.atom[s].getResidue().pdbres.strip() + str(self.dsim.cst.atom[s].getResidue().resnum)
+                        #don_pos = pos[solute_atom_ids[0]-1]
+                        #h_pos = pos[solute_atom_ids[1]-1]
+                        #dist = np.linalg.norm(don_pos-wat_O_pos)
+                        acc_pos = pos[solute_atom_ids[0]-1]
+                        dist = np.linalg.norm(acc_pos-wat_O_pos)
+                        theta_list = [self._getTheta(frame, acc_pos, wat_O_pos, pos[wat_O]), 
+                                    self._getTheta(frame, acc_pos, wat_O_pos, pos[wat_O-2])]
+                        #angle = self._getTheta(frame, wat_O_pos, don_pos, h_pos)
+                        angle = min(theta_list)
+                        #print dist, min(theta_list)
+                        #if dist <= 3.5 and angle[0] <= 30:
+                        if dist <= 3.5 and angle <= 30:
+                            Elec_sw = quick.elecE(cluster_water_all_atoms, solute_atom_ids, pos, self.charges, self.pbc)*0.5
+                            LJ_sw = quick.vdwE(np.asarray([wat_O]), solute_atom_ids, pos, self.vdw, self.pbc)*0.5
+                            print Elec_sw+LJ_sw
+                #print
+            
+                    
+            """
                         self.hsa_data[cluster][1][3] += Elec_sw + LJ_sw
                         self.hsa_data[cluster][2][3].append(Elec_sw + LJ_sw)
                         self.hsa_data[cluster][1][4] += LJ_sw
@@ -336,6 +396,7 @@ class HSAcalcs:
                     # solvent-solvent energy calcs
                     # obtain this water's electrostatic interaction with all other atoms
                     # and also collect all its nbr's electrostatic interactions into index 7 of and total number of neighbours into index 8
+                    
                     Elec_ww = quick.elecE(cluster_water_all_atoms, rest_wat_at_ids, pos, self.charges, self.pbc)*0.5
                     LJ_ww = quick.vdwE(np.asarray([wat_O]), rest_wat_oxygen_at_ids, pos, self.vdw, self.pbc)*0.5
                     Etot += Elec_ww + LJ_ww
@@ -356,14 +417,14 @@ class HSAcalcs:
                     if len(firstshell_wat_oxygens) != 0:
                         nbr_energy_array = np.zeros(len(firstshell_wat_oxygens), dtype="float64")
                         quick.nbr_E_ww(wat_O, np.asarray(firstshell_wat_oxygens), pos, self.vdw, self.charges, self.pbc, nbr_energy_array)
-                        self.hsa_data[cluster][1][10] += np.sum(nbr_energy_array*0.5)
+                        self.hsa_data[cluster][1][10] += (np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5
                         self.hsa_data[cluster][2][10].append((np.sum(nbr_energy_array)/len(firstshell_wat_oxygens))*0.5)
                         for ene in nbr_energy_array:
                             #print ene
                             self.hsa_data[cluster][2][12].append(ene/2.0)
                             #if ene/2.0 < -4.5:
                             #    print "highly favorable interaction!"
-
+                    """
 #*********************************************************************************************#
 
     def normalizeClusterQuantities(self, n_frame):
@@ -395,7 +456,7 @@ class HSAcalcs:
                 self.hsa_data[cluster][1][9] /= self.hsa_data[cluster][1][0]
                 # Normalized Nbr and Ewwnbr
                 if self.hsa_data[cluster][1][11] != 0:
-                    self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][11]
+                    self.hsa_data[cluster][1][10] /= self.hsa_data[cluster][1][0]
                     self.hsa_data[cluster][1][11] /= self.hsa_data[cluster][1][0]
 
 #*********************************************************************************************#
@@ -563,11 +624,11 @@ if (__name__ == '__main__') :
     print "Running calculations ..."
     t = time.time()
     h.hsEnergyCalculation(options.frames, options.start_frame)
-    h.normalizeClusterQuantities(options.frames)
+    #h.normalizeClusterQuantities(options.frames)
     print "Done! took %8.3f seconds." % (time.time() - t)
-    print "Writing timeseries data ..."
-    h.writeTimeSeries(options.prefix)
-    print "Writing summary..."
-    h.writeHBsummary(options.prefix)
+    #print "Writing timeseries data ..."
+    #h.writeTimeSeries(options.prefix)
+    #print "Writing summary..."
+    #h.writeHBsummary(options.prefix)
 
     

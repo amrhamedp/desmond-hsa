@@ -29,7 +29,7 @@ __version__ = "$Revision: $ $Date: $"
   gcc -O3 -lm -fPIC -shared -I/usr/local/include/python2.5 -I/usr/local/lib/python2.5/site-packages/numpy/core/include -o _hsacalcs.so _hsacalcs.c
 
 */
-
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION  
 #include "Python.h"
 #include "numpy/arrayobject.h"
 #include <math.h>
@@ -134,8 +134,8 @@ PyObject *_gistcalcs_vdwE( PyObject *self, PyObject *args)
     int i, j;
     int *wat, *other;
     double *b_x, *b_y, *b_z;
-    double *wx, *wy, *wz, *wc, *w_sig, *w_eps;
-    double *sx, *sy, *sz, *sc, *s_sig, *s_eps;
+    double *wx, *wy, *wz, *w_sig, *w_eps;
+    double *sx, *sy, *sz, *s_sig, *s_eps;
     double comb_sig, comb_eps;
     double d, dist6, dist12, aij, bij;
     double e_vdw = 0.0;
